@@ -47,9 +47,4 @@ duys_boost/
 │   └── admin.html      # Admin panel (subdomain-ready)
 ```
 
-## Production Notes
-- Replace SQLite with PostgreSQL
-- Integrate Stripe/PayPal/Paystack for real payments
-- Add Google/Facebook OAuth in auth.html social buttons
-- Use Flask-SocketIO for true real-time updates
-- Deploy admin on subdomain via Nginx routing
+
