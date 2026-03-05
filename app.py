@@ -425,7 +425,7 @@ def activity_feed():
                      'time':r['submitted_at'][11:19]} for r in rows])
 
 if __name__ == '__main__':
-    init_db()
+   
     app.run(debug=True)
  # Render provides a PORT environment variable. If it's not there, default to 5000.
     port = int(os.environ.get("PORT", 5000))
