@@ -426,8 +426,5 @@ def activity_feed():
 
 if __name__ == '__main__':
    
-    app.run(debug=True)
- # Render provides a PORT environment variable. If it's not there, default to 5000.
-    port = int(os.environ.get("PORT", 5000))
-    # Bind to 0.0.0.0 so the app is reachable externally
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True ,host='0.0.0.0')
+ 
