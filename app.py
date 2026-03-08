@@ -425,9 +425,6 @@ def activity_feed():
                      'time':r['submitted_at'][11:19]} for r in rows])
 
 if __name__ == '__main__':
-    init_db()
-    app.run(debug=True)
-    port = int(os.environ.get("PORT", 10000))
-    # Bind to 0.0.0.0 to be accessible externally
-    app.run(host="0.0.0.0", port=port)
-
+   
+    app.run(debug=True ,host='0.0.0.0')
+ 
