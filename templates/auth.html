@@ -45,8 +45,8 @@
     </form>
     <div class="divider">or continue with</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <button class="social-btn" onclick="showToast('Social login coming soon!','info')">🌐 Google</button>
-      <button class="social-btn" onclick="showToast('Social login coming soon!','info')">📘 Facebook</button>
+      <button class="social-btn" type="button" onclick="window.location='{{ url_for('google_login_route') }}'">🌐 Google</button>
+      <button class="social-btn" type="button" onclick="window.location='{{ url_for('apple_login_route') }}'"> Apple</button>
     </div>
     {% else %}
     <form id="auth-form">

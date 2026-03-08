@@ -15,7 +15,7 @@
   </div>
   <div class="stat-card">
     <div class="stat-label">Balance</div>
-    <div class="stat-value purple">${{ '%.2f'|format(current_user.balance) }}</div>
+    <div class="stat-value purple">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(current_user.balance) }}</div>
     <div class="stat-sub">Current wallet</div>
   </div>
 </div>
@@ -32,17 +32,22 @@
       <div style="font-size:12px;color:var(--muted);margin-bottom:3px">{{ ad.platform }}</div>
       <div style="font-size:15px;font-weight:700">{{ ad.title }}</div>
     </div>
-    <div style="font-size:22px;font-weight:800;color:var(--green)">${{ '%.2f'|format(ad.reward_per_task) }}</div>
+    <div style="font-size:22px;font-weight:800;color:var(--green)">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(ad.reward_per_task) }}</div>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
     <span class="badge badge-active">{{ ad.task_type }}</span>
-    <span style="font-size:12px;color:var(--muted);display:flex;align-items:center">{{ ad.followers_gained }}/{{ ad.followers_target }} done</span>
+    <span style="font-size:12px;color:var(--muted);display:flex;align-items:center">
+      {{ ad.followers_gained }}/{{ ad.followers_target }} done
+      {% if ad.followers_target %}
+        · {{ ad.followers_target - ad.followers_gained }} left
+      {% endif %}
+    </span>
   </div>
   <a href="{{ ad.target_url }}" target="_blank" class="btn btn-outline btn-sm" style="margin-bottom:10px;width:100%;justify-content:center">
     Open {{ ad.platform }} Page ↗
   </a>
-  <button class="btn btn-green btn-sm" style="width:100%;justify-content:center" onclick="openSubmit({{ ad.id }},'{{ ad.title|replace("'","\\'") }}')">
-    Submit Proof & Earn ${{ '%.2f'|format(ad.reward_per_task) }}
+  <button class="btn btn-green btn-sm" style="width:100%;justify-content:center" onclick="openSubmit({{ ad.id }},'{{ ad.title|replace("\"","\\'") }}')">
+    Submit Proof & Earn {{ CURRENCY_SYMBOL }}{{ '%.2f'|format(ad.reward_per_task) }}
   </button>
 </div>
 {% endfor %}
@@ -67,11 +72,11 @@
     <tbody>
     {% for t in my_tasks %}
     <tr>
-      <td style="font-weight:600">{{ t.ad.title }}</td>
+      <td style="font-weight:600">{{ t.ad_title }}</td>
       <td><a href="{{ t.proof_link }}" target="_blank" style="color:var(--accent);font-size:12px">View Proof ↗</a></td>
-      <td style="color:var(--green);font-weight:700">${{ '%.2f'|format(t.reward) }}</td>
+      <td style="color:var(--green);font-weight:700">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(t.reward) }}</td>
       <td><span class="badge badge-{{ t.status }}">{{ t.status }}</span></td>
-      <td style="color:var(--muted);font-size:12px">{{ t.submitted_at.strftime('%b %d, %Y') }}</td>
+      <td style="color:var(--muted);font-size:12px">{{ t.submitted_at[:10] }}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -118,7 +123,7 @@ document.getElementById('submit-form').addEventListener('submit',async e=>{
   const r=await fetch('/tasks/submit',{method:'POST',body:fd});
   const d=await r.json();
   btn.textContent='Submit & Claim Reward 💰';btn.disabled=false;
-  if(d.success){showToast(`🎉 Earned $${d.earned.toFixed(2)}!`);closeSubmit();setTimeout(()=>location.reload(),1500);}
+  if(d.success){showToast(`🎉 Earned {{ CURRENCY_SYMBOL }}${d.earned.toFixed(2)}!`);closeSubmit();setTimeout(()=>location.reload(),1500);}
   else{const el=document.getElementById('submit-error');el.style.display='block';el.textContent=d.error;}
 });
 </script>

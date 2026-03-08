@@ -27,7 +27,7 @@
       </div>
       <div style="display:flex;gap:14px;align-items:flex-start">
         <div style="width:32px;height:32px;border-radius:50%;background:var(--green);display:grid;place-items:center;font-weight:700;font-size:14px;color:#000;flex-shrink:0">3</div>
-        <div><div style="font-weight:600;margin-bottom:2px">You earn $1.00</div><div style="font-size:13px;color:var(--muted)">Instantly credited to your wallet.</div></div>
+        <div><div style="font-weight:600;margin-bottom:2px">You earn {{ CURRENCY_SYMBOL }}1.00</div><div style="font-size:13px;color:var(--muted)">Instantly credited to your wallet.</div></div>
       </div>
     </div>
   </div>
@@ -40,7 +40,7 @@
   </div>
   <div class="stat-card">
     <div class="stat-label">Total Earned</div>
-    <div class="stat-value green">${{ '%.2f'|format(total_earned) }}</div>
+    <div class="stat-value green">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(total_earned) }}</div>
   </div>
 </div>
 
@@ -54,8 +54,8 @@
       {% for u in referred_users %}
       <tr>
         <td style="font-weight:600">{{ u.username }}</td>
-        <td style="font-size:13px;color:var(--muted)">{{ u.created_at.strftime('%b %d, %Y') }}</td>
-        <td style="color:var(--green);font-weight:700">+$1.00</td>
+        <td style="font-size:13px;color:var(--muted)">{{ u.created_at[:10] }}</td>
+        <td style="color:var(--green);font-weight:700">+{{ CURRENCY_SYMBOL }}1.00</td>
       </tr>
       {% endfor %}
       </tbody>

@@ -1,11 +1,48 @@
 import sqlite3, secrets, hashlib, os
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, g
 from datetime import datetime
 from functools import wraps
+
+import requests
+from authlib.integrations.flask_client import OAuth
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, g
 
 app = Flask(__name__)
 app.secret_key = 'duys_boost_secret_2024_xK9mP'
 DB_PATH = os.path.join(os.path.dirname(__file__), 'duys_boost.db')
+
+# Currency & pricing (Ghana Cedis)
+CURRENCY_CODE = 'GHS'
+CURRENCY_SYMBOL = 'GH₵'
+WORKER_REWARD_PER_TASK = 0.30   # 30 pesewas earned per completed follower task
+LISTER_COST_PER_TASK = 0.70     # 70 pesewas spent per follower gained
+
+# External integrations
+PAYSTACK_PUBLIC_KEY = os.environ.get('PAYSTACK_PUBLIC_KEY', '')
+PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY', '')
+
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+APPLE_CLIENT_ID = os.environ.get('APPLE_CLIENT_ID', '')
+APPLE_CLIENT_SECRET = os.environ.get('APPLE_CLIENT_SECRET', '')
+
+oauth = OAuth(app)
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    oauth.register(
+        name='google',
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+        client_kwargs={'scope': 'openid email profile'},
+    )
+
+if APPLE_CLIENT_ID and APPLE_CLIENT_SECRET:
+    oauth.register(
+        name='apple',
+        client_id=APPLE_CLIENT_ID,
+        client_secret=APPLE_CLIENT_SECRET,
+        server_metadata_url='https://appleid.apple.com/.well-known/openid-configuration',
+        client_kwargs={'scope': 'name email'},
+    )
 
 @app.route('/')
 def index():
@@ -132,11 +169,14 @@ def get_current_user():
         return None
     return get_db().execute('SELECT * FROM users WHERE id=?', (session['user_id'],)).fetchone()
 
-app.jinja_env.globals['current_user'] = lambda: get_current_user()
-
 @app.context_processor
 def inject_user():
-    return {'current_user': get_current_user()}
+    return {
+        'current_user': get_current_user(),
+        'CURRENCY_SYMBOL': CURRENCY_SYMBOL,
+        'CURRENCY_CODE': CURRENCY_CODE,
+        'PAYSTACK_PUBLIC_KEY': PAYSTACK_PUBLIC_KEY,
+    }
 
 # ── ROUTES ────────────────────────────────────────────────────────────────────
 
@@ -146,26 +186,36 @@ def signup():
     if request.method == 'POST':
         db = get_db()
         username = request.form.get('username','').strip()
-        email    = request.form.get('email','').strip()
+        email = request.form.get('email','').strip()
         password = request.form.get('password','')
-        confirm  = request.form.get('confirm_password','')
+        confirm = request.form.get('confirm_password','')
         ref_code = request.form.get('referral_code','').strip()
         errors = []
-        if len(username) < 3: errors.append('Username must be at least 3 characters.')
-        if len(password) < 8: errors.append('Password must be at least 8 characters.')
-        if password != confirm: errors.append('Passwords do not match.')
-        if db.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone(): errors.append('Email already registered.')
-        if db.execute('SELECT id FROM users WHERE username=?',(username,)).fetchone(): errors.append('Username already taken.')
-        if errors: return jsonify({'success':False,'errors':errors})
+        if len(username) < 3:
+            errors.append('Username must be at least 3 characters.')
+        if len(password) < 8:
+            errors.append('Password must be at least 8 characters.')
+        # Basic password complexity: upper, lower, digit
+        if not any(c.islower() for c in password) or not any(c.isupper() for c in password) or not any(c.isdigit() for c in password):
+            errors.append('Password must include upper, lower case letters and numbers.')
+        if password != confirm:
+            errors.append('Passwords do not match.')
+        if db.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone():
+            errors.append('Email already registered.')
+        if db.execute('SELECT id FROM users WHERE username=?',(username,)).fetchone():
+            errors.append('Username already taken.')
+        if errors:
+            return jsonify({'success':False,'errors':errors})
         referrer = db.execute('SELECT * FROM users WHERE referral_code=?',(ref_code,)).fetchone() if ref_code else None
         db.execute('INSERT INTO users (username,email,password,referred_by,referral_code) VALUES (?,?,?,?,?)',
                    (username,email,hash_password(password),referrer['id'] if referrer else None,secrets.token_hex(5)))
         db.commit()
         user = db.execute('SELECT * FROM users WHERE username=?',(username,)).fetchone()
         if referrer:
-            db.execute('UPDATE users SET balance=balance+1.0 WHERE id=?',(referrer['id'],))
-            add_notification(db, referrer['id'], f'🎉 {username} signed up using your referral! +$1.00 added.')
-            add_transaction(db, referrer['id'], 'earn', 1.0, f'Referral bonus from {username}')
+            bonus_amount = 1.0
+            db.execute('UPDATE users SET balance=balance+? WHERE id=?',(bonus_amount,referrer['id']))
+            add_notification(db, referrer['id'], f'🎉 {username} signed up using your referral! +{CURRENCY_SYMBOL}{bonus_amount:.2f} added.')
+            add_transaction(db, referrer['id'], 'earn', bonus_amount, f'Referral bonus from {username}')
         add_notification(db, user['id'], '👋 Welcome to DUYS Boost! Your account is ready.')
         db.commit()
         session['user_id'] = user['id']
@@ -190,6 +240,83 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
+@app.route('/auth/google')
+def google_login_route():
+    # Redirect to Google OAuth if configured, otherwise fall back to normal login
+    if not getattr(oauth, 'google', None):
+        return redirect(url_for('login'))
+    redirect_uri = url_for('google_auth_callback', _external=True)
+    return oauth.google.authorize_redirect(redirect_uri)
+
+@app.route('/auth/google/callback')
+def google_auth_callback():
+    if not getattr(oauth, 'google', None):
+        return redirect(url_for('login'))
+    try:
+        token = oauth.google.authorize_access_token()
+        userinfo = oauth.google.parse_id_token(token)
+    except Exception:
+        return redirect(url_for('login'))
+    email = (userinfo or {}).get('email')
+    name = (userinfo or {}).get('name') or (email.split('@')[0] if email else None)
+    if not email:
+        return redirect(url_for('login'))
+    db = get_db()
+    user = db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
+    if not user:
+        base = (name or email.split('@')[0]).replace(' ', '').lower()
+        username = base or 'user'
+        i = 1
+        while db.execute('SELECT id FROM users WHERE username=?',(username,)).fetchone():
+            username = f'{base}{i}'
+            i += 1
+        db.execute('INSERT INTO users (username,email,password,referral_code) VALUES (?,?,?,?)',
+                   (username, email, None, secrets.token_hex(5)))
+        db.commit()
+        user = db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
+        add_notification(db, user['id'], '🔐 Signed in with Google.')
+        db.commit()
+    session['user_id'] = user['id']
+    return redirect(url_for('dashboard'))
+
+@app.route('/auth/apple')
+def apple_login_route():
+    if not getattr(oauth, 'apple', None):
+        return redirect(url_for('login'))
+    redirect_uri = url_for('apple_auth_callback', _external=True)
+    return oauth.apple.authorize_redirect(redirect_uri)
+
+@app.route('/auth/apple/callback', methods=['GET','POST'])
+def apple_auth_callback():
+    if not getattr(oauth, 'apple', None):
+        return redirect(url_for('login'))
+    try:
+        token = oauth.apple.authorize_access_token()
+        userinfo = token.get('userinfo') or {}
+    except Exception:
+        return redirect(url_for('login'))
+    email = userinfo.get('email')
+    name = userinfo.get('name') or (email.split('@')[0] if email else None)
+    if not email:
+        return redirect(url_for('login'))
+    db = get_db()
+    user = db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
+    if not user:
+        base = (name or email.split('@')[0]).replace(' ', '').lower()
+        username = base or 'user'
+        i = 1
+        while db.execute('SELECT id FROM users WHERE username=?',(username,)).fetchone():
+            username = f'{base}{i}'
+            i += 1
+        db.execute('INSERT INTO users (username,email,password,referral_code) VALUES (?,?,?,?)',
+                   (username, email, None, secrets.token_hex(5)))
+        db.commit()
+        user = db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
+        add_notification(db, user['id'], '🔐 Signed in with Apple.')
+        db.commit()
+    session['user_id'] = user['id']
+    return redirect(url_for('dashboard'))
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -212,7 +339,7 @@ def dashboard():
 def ads():
     db = get_db()
     user_ads = db.execute('SELECT * FROM ads WHERE user_id=? ORDER BY created_at DESC',(session['user_id'],)).fetchall()
-    return render_template('ads.html', ads=user_ads)
+    return render_template('ads.html', ads=user_ads, worker_reward=WORKER_REWARD_PER_TASK, lister_cost=LISTER_COST_PER_TASK)
 
 @app.route('/ads/create', methods=['POST'])
 @login_required
@@ -220,13 +347,22 @@ def create_ad():
     db = get_db()
     uid = session['user_id']
     user = db.execute('SELECT * FROM users WHERE id=?',(uid,)).fetchone()
-    budget = float(request.form.get('budget',0))
-    reward = float(request.form.get('reward_per_task',0.10))
+    followers_target = int(request.form.get('followers_target',0))
+    if followers_target <= 0:
+        return jsonify({'success':False,'error':'Please enter a valid followers target.'})
+    # Enforce pricing: advertiser spends 0.70 GHS per follower, worker earns 0.30 GHS
+    budget = followers_target * LISTER_COST_PER_TASK
     if budget <= 0 or budget > user['balance']:
-        return jsonify({'success':False,'error':'Insufficient balance or invalid budget.'})
+        return jsonify({'success':False,'error':'Insufficient balance for this followers target.'})
     db.execute('INSERT INTO ads (user_id,title,platform,target_url,task_type,reward_per_task,budget,followers_target) VALUES (?,?,?,?,?,?,?,?)',
-               (uid,request.form.get('title'),request.form.get('platform'),request.form.get('target_url'),
-                request.form.get('task_type'),reward,budget,int(request.form.get('followers_target',0))))
+               (uid,
+                request.form.get('title'),
+                request.form.get('platform'),
+                request.form.get('target_url'),
+                request.form.get('task_type'),
+                WORKER_REWARD_PER_TASK,
+                budget,
+                followers_target))
     db.execute('UPDATE users SET balance=balance-? WHERE id=?',(budget,uid))
     ad = db.execute('SELECT * FROM ads WHERE user_id=? ORDER BY id DESC LIMIT 1',(uid,)).fetchone()
     add_transaction(db, uid, 'spend', budget, f'Budget for ad: {ad["title"]}')
@@ -271,17 +407,18 @@ def submit_task():
         return jsonify({'success':False,'error':'Already submitted for this ad.'})
     if not proof_link.startswith('http'): return jsonify({'success':False,'error':'Please enter a valid proof URL.'})
     now = datetime.utcnow().isoformat()
+    reward = WORKER_REWARD_PER_TASK
     db.execute('INSERT INTO task_completions (ad_id,worker_id,proof_link,status,reward,reviewed_at) VALUES (?,?,?,?,?,?)',
-               (ad_id,uid,proof_link,'approved',ad['reward_per_task'],now))
-    db.execute('UPDATE users SET balance=balance+? WHERE id=?',(ad['reward_per_task'],uid))
+               (ad_id,uid,proof_link,'approved',reward,now))
+    db.execute('UPDATE users SET balance=balance+? WHERE id=?',(reward,uid))
     db.execute('UPDATE ads SET budget_spent=budget_spent+?, followers_gained=followers_gained+1 WHERE id=?',
-               (ad['reward_per_task'],ad_id))
+               (LISTER_COST_PER_TASK,ad_id))
     updated_ad = db.execute('SELECT * FROM ads WHERE id=?',(ad_id,)).fetchone()
     if updated_ad['budget_spent'] >= updated_ad['budget'] or (updated_ad['followers_target'] and updated_ad['followers_gained'] >= updated_ad['followers_target']):
         db.execute('UPDATE ads SET status="completed" WHERE id=?',(ad_id,))
         add_notification(db, ad['user_id'], f'✅ Your ad "{ad["title"]}" has reached its goal!')
-    add_transaction(db, uid, 'earn', ad['reward_per_task'], f'Task completed: {ad["title"]}')
-    add_notification(db, uid, f'💰 +${ad["reward_per_task"]:.2f} earned for completing "{ad["title"]}"')
+    add_transaction(db, uid, 'earn', reward, f'Task completed: {ad["title"]}')
+    add_notification(db, uid, f'💰 +{CURRENCY_SYMBOL}{reward:.2f} earned for completing "{ad["title"]}"')
     add_notification(db, ad['user_id'], f'📈 New follower gained on "{ad["title"]}"!')
     db.commit()
     return jsonify({'success':True,'earned':ad['reward_per_task']})
@@ -298,13 +435,44 @@ def wallet():
 @app.route('/wallet/deposit', methods=['POST'])
 @login_required
 def deposit():
+    # This endpoint is called from the Paystack inline callback to confirm and credit deposits.
+    if not PAYSTACK_SECRET_KEY:
+        return jsonify({'success':False,'error':'Deposits are not available. Paystack is not configured.'}), 503
     db = get_db()
     uid = session['user_id']
-    amount = float(request.form.get('amount',0))
-    if amount <= 0: return jsonify({'success':False,'error':'Invalid amount.'})
-    db.execute('UPDATE users SET balance=balance+? WHERE id=?',(amount,uid))
-    add_transaction(db, uid, 'deposit', amount, 'Funds deposited')
-    add_notification(db, uid, f'💳 ${amount:.2f} deposited to your wallet.')
+    payload = request.get_json(silent=True) or {}
+    reference = payload.get('reference')
+    declared_amount = float(payload.get('amount', 0) or 0)
+    if not reference or declared_amount <= 0:
+        return jsonify({'success':False,'error':'Invalid deposit payload.'}), 400
+    try:
+        resp = requests.get(
+            f'https://api.paystack.co/transaction/verify/{reference}',
+            headers={'Authorization': f'Bearer {PAYSTACK_SECRET_KEY}'},
+            timeout=10,
+        )
+        body = resp.json()
+    except Exception:
+        return jsonify({'success':False,'error':'Failed to verify payment with Paystack.'}), 502
+    if not body.get('status'):
+        return jsonify({'success':False,'error':'Unable to verify payment.'}), 400
+    data = body.get('data') or {}
+    if data.get('status') != 'success' or data.get('currency') != CURRENCY_CODE:
+        return jsonify({'success':False,'error':'Payment not successful.'}), 400
+    paid_amount = (data.get('amount') or 0) / 100.0
+    if paid_amount <= 0:
+        return jsonify({'success':False,'error':'Invalid amount from payment gateway.'}), 400
+    # Prevent double-credit: tag transactions with the Paystack reference
+    existing = db.execute(
+        'SELECT id FROM transactions WHERE description LIKE ?',
+        (f'%{reference}%',)
+    ).fetchone()
+    if existing:
+        user = db.execute('SELECT balance FROM users WHERE id=?',(uid,)).fetchone()
+        return jsonify({'success':True,'balance':user['balance']})
+    db.execute('UPDATE users SET balance=balance+? WHERE id=?',(paid_amount,uid))
+    add_transaction(db, uid, 'deposit', paid_amount, f'Paystack deposit {reference}')
+    add_notification(db, uid, f'💳 {CURRENCY_SYMBOL}{paid_amount:.2f} deposited to your wallet via Paystack.')
     db.commit()
     user = db.execute('SELECT balance FROM users WHERE id=?',(uid,)).fetchone()
     return jsonify({'success':True,'balance':user['balance']})
@@ -322,7 +490,7 @@ def withdraw():
     db.execute('UPDATE users SET balance=balance-? WHERE id=?',(amount,uid))
     db.execute('INSERT INTO withdrawals (user_id,amount,method,account) VALUES (?,?,?,?)',(uid,amount,method,account))
     add_transaction(db, uid, 'withdrawal', amount, f'Withdrawal via {method}', status='pending')
-    add_notification(db, uid, f'🏦 Withdrawal of ${amount:.2f} via {method} submitted.')
+    add_notification(db, uid, f'🏦 Withdrawal of {CURRENCY_SYMBOL}{amount:.2f} via {method} submitted.')
     db.commit()
     updated = db.execute('SELECT balance FROM users WHERE id=?',(uid,)).fetchone()
     return jsonify({'success':True,'balance':updated['balance']})
@@ -394,9 +562,9 @@ def process_withdrawal(wdr_id, action):
     db.execute('UPDATE withdrawals SET status=? WHERE id=?',(new_status,wdr_id))
     if action == 'rejected':
         db.execute('UPDATE users SET balance=balance+? WHERE id=?',(wr['amount'],wr['user_id']))
-        add_notification(db, wr['user_id'], f'❌ Withdrawal of ${wr["amount"]:.2f} rejected. Amount refunded.')
+        add_notification(db, wr['user_id'], f'❌ Withdrawal of {CURRENCY_SYMBOL}{wr["amount"]:.2f} rejected. Amount refunded.')
     else:
-        add_notification(db, wr['user_id'], f'✅ Withdrawal of ${wr["amount"]:.2f} approved!')
+        add_notification(db, wr['user_id'], f'✅ Withdrawal of {CURRENCY_SYMBOL}{wr["amount"]:.2f} approved!')
     db.commit()
     return jsonify({'success':True})
 
@@ -410,7 +578,7 @@ def admin_deposit():
     amount  = float(request.form.get('amount'))
     db.execute('UPDATE users SET balance=balance+? WHERE id=?',(amount,user_id))
     add_transaction(db, user_id, 'deposit', amount, 'Admin deposit')
-    add_notification(db, user_id, f'💰 Admin credited ${amount:.2f} to your account!')
+    add_notification(db, user_id, f'💰 Admin credited {CURRENCY_SYMBOL}{amount:.2f} to your account!')
     db.commit()
     return jsonify({'success':True})
 
@@ -427,7 +595,7 @@ def activity_feed():
 if __name__ == '__main__':
     init_db()
     app.run(debug=True)
-    port = int(os.environ.get("PORT", 10000))
-    # Bind to 0.0.0.0 to be accessible externally
-    app.run(host="0.0.0.0", port=port)
+    # port = int(os.environ.get("PORT", 10000))
+    # # Bind to 0.0.0.0 to be accessible externally
+    # app.run(host="0.0.0.0", port=port)
 

@@ -5,17 +5,17 @@
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-label">Wallet Balance</div>
-    <div class="stat-value green">${{ '%.2f'|format(current_user.balance) }}</div>
+    <div class="stat-value green">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(current_user.balance) }}</div>
     <div class="stat-sub">Available to spend or withdraw</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Total Earned</div>
-    <div class="stat-value cyan">${{ '%.2f'|format(total_earned) }}</div>
+    <div class="stat-value cyan">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(total_earned) }}</div>
     <div class="stat-sub">From completed tasks</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Total Spent</div>
-    <div class="stat-value purple">${{ '%.2f'|format(total_spent) }}</div>
+    <div class="stat-value purple">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(total_spent) }}</div>
     <div class="stat-sub">On ad campaigns</div>
   </div>
   <div class="stat-card">
@@ -39,13 +39,13 @@
         <div style="font-size:14px;font-weight:600">{{ ad.title }}</div>
         <span class="badge badge-{{ ad.status }}">{{ ad.status }}</span>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">{{ ad.platform }} · {{ ad.task_type }} · ${{ '%.2f'|format(ad.reward_per_task) }}/task</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">{{ ad.platform }} · {{ ad.task_type }} · {{ CURRENCY_SYMBOL }}{{ '%.2f'|format(ad.reward_per_task) }}/task</div>
       <div class="progress-bar">
         <div class="progress-fill" style="width:{{ [(ad.budget_spent/ad.budget*100)|int, 100]|min }}%"></div>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
         <span>{{ ad.followers_gained }}/{{ ad.followers_target }} followers</span>
-        <span>${{ '%.2f'|format(ad.budget_spent) }}/${{ '%.2f'|format(ad.budget) }}</span>
+        <span>{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(ad.budget_spent) }}/{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(ad.budget) }}</span>
       </div>
     </div>
     {% endfor %}
@@ -68,7 +68,7 @@
         <div style="font-size:12px;color:var(--muted)">{{ ad.platform }} · {{ ad.task_type }}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:15px;font-weight:700;color:var(--green)">${{ '%.2f'|format(ad.reward_per_task) }}</div>
+      <div style="font-size:15px;font-weight:700;color:var(--green)">{{ CURRENCY_SYMBOL }}{{ '%.2f'|format(ad.reward_per_task) }}</div>
         <a href="{{ url_for('tasks') }}" class="btn btn-green btn-sm" style="margin-top:4px">Do it</a>
       </div>
     </div>
@@ -105,7 +105,7 @@ async function loadActivity(){
       <div class="activity-item">
         <div class="activity-dot"></div>
         <div style="flex:1;font-size:14px"><strong>${item.worker}</strong> completed task for <em>${item.ad}</em></div>
-        <div style="font-size:14px;font-weight:700;color:var(--green)">+$${item.reward.toFixed(2)}</div>
+        <div style="font-size:14px;font-weight:700;color:var(--green)">+{{ CURRENCY_SYMBOL }}${item.reward.toFixed(2)}</div>
         <div style="font-size:12px;color:var(--muted);margin-left:12px">${item.time}</div>
       </div>`).join('');
   }catch(e){}
